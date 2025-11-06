@@ -10,12 +10,16 @@ import {
   Vibration,
 } from 'react-native';
 import { Camera, useCameraDevices } from 'react-native-vision-camera';
+import Geolocation from '@react-native-community/geolocation';
+
+const API_BASE_URL = 'https://your-api-endpoint.com'; // Replace with your actual API endpoint
 
 export default function CameraScreen({ navigation }) {
   const [hasPermission, setHasPermission] = useState(false);
   const [isActive, setIsActive] = useState(true);
   const [detectedHazards, setDetectedHazards] = useState([]);
-  const [isScanning, setIsScanning] = useState(false);
+  const [receivedAlerts, setReceivedAlerts] = useState([]);
+  const [currentLocation, setCurrentLocation] = useState(null);
   const camera = useRef(null);
   const devices = useCameraDevices();
   const device = devices[0];
@@ -24,19 +28,27 @@ export default function CameraScreen({ navigation }) {
     console.log(devices);
     console.log(device);
     checkPermissions();
+    // getCurrentLocation();
     
-    // Simulate hazard detection every 3 seconds
-    const interval = setInterval(() => {
-      if (isScanning) {
-        simulateHazardDetection();
-      }
-    }, 3000);
+    // Poll for nearby alerts every 5 seconds
+    const alertInterval = setInterval(() => {
+      fetchNearbyAlerts();
+    }, 5000);
 
     return () => {
-      clearInterval(interval);
+      clearInterval(alertInterval);
       setIsActive(false);
     };
-  }, [isScanning]);
+  }, []);
+
+  // Update location every 10 seconds
+  useEffect(() => {
+    const locationInterval = setInterval(() => {
+      // getCurrentLocation();
+    }, 10000);
+
+    return () => clearInterval(locationInterval);
+  }, []);
 
   const checkPermissions = async () => {
     const cameraPermission = await Camera.requestCameraPermission();
@@ -44,34 +56,177 @@ export default function CameraScreen({ navigation }) {
     setHasPermission(cameraPermission === 'granted');
   };
 
-  const simulateHazardDetection = () => {
-    const hazards = [
-      '⚠️ Pothole detected',
-      '🚧 Road construction ahead',
-      '💧 Wet road surface',
-      '🚗 Stopped vehicle',
-      '🦌 Animal crossing',
-    ];
-    
-    const randomHazard = hazards[Math.floor(Math.random() * hazards.length)];
-    
-    setDetectedHazards(prev => [
-      { id: Date.now(), text: randomHazard, timestamp: new Date() },
-      ...prev.slice(0, 4)
-    ]);
-    
-    Vibration.vibrate(200);
-    sendNotificationToNearbyDrivers(randomHazard);
+  const getCurrentLocation = () => {
+    Geolocation.getCurrentPosition(
+      (position) => {
+        setCurrentLocation({
+          latitude: position.coords.latitude,
+          longitude: position.coords.longitude,
+        });
+      },
+      (error) => {
+        console.error('Error getting location:', error);
+        Alert.alert('Location Error', 'Unable to get current location');
+      },
+      { enableHighAccuracy: true, timeout: 15000, maximumAge: 10000 }
+    );
   };
 
-  const sendNotificationToNearbyDrivers = (hazard) => {
-    // In production, this would send to a backend API
-    console.log(`Sending notification: ${hazard}`);
-    // Show toast or notification that alert was sent
+  // Function to capture photo and send hazard to backend
+  const reportHazard = async (hazardType, description) => {
+    try {
+      
+    const position = await new Promise((resolve, reject) => {
+      Geolocation.getCurrentPosition(
+        (position) => {
+          setCurrentLocation({
+            latitude: position.coords.latitude,
+            longitude: position.coords.longitude,
+          });
+          resolve(position); // Return the position object
+        },
+        (error) => {
+          console.error('Error getting location:', error);
+          reject(error);
+        },
+        { enableHighAccuracy: true, timeout: 15000, maximumAge: 10000 }
+      );
+    });
+
+    // Use the position from the Promise, not the state variable
+    const currentLocation = {
+      latitude: position.coords.latitude,
+      longitude: position.coords.longitude,
+    };
+
+      if (!camera.current) {
+        throw new Error('Camera not ready');
+      }
+
+      if (!currentLocation) {
+        throw new Error('Location not available');
+      }
+
+      // Capture photo
+      const photo = await camera.current.takePhoto({
+        qualityPrioritization: 'balanced',
+        flash: 'off',
+      });
+
+      // Prepare form data
+      const formData = new FormData();
+      formData.append('photo', {
+        uri: photo.path,
+        type: 'image/jpeg',
+        name: `hazard_${Date.now()}.jpg`,
+      });
+      formData.append('latitude', currentLocation.latitude.toString());
+      formData.append('longitude', currentLocation.longitude.toString());
+      formData.append('hazardType', hazardType);
+      formData.append('description', description);
+      formData.append('timestamp', new Date().toISOString());
+
+      // Send to backend
+      const response = await fetch(`${API_BASE_URL}/api/hazards/report`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'multipart/form-data',
+        },
+        body: formData,
+      });
+
+      if (!response.ok) {
+        throw new Error(`API error: ${response.status}`);
+      }
+
+      const result = await response.json();
+      console.log('Hazard reported successfully:', result);
+
+      // Add to local detected hazards
+      setDetectedHazards(prev => [
+        {
+          id: Date.now(),
+          text: `${getHazardEmoji(hazardType)} ${description}`,
+          timestamp: new Date(),
+          type: 'detected',
+        },
+        ...prev.slice(0, 4)
+      ]);
+
+      Vibration.vibrate(200);
+
+    } catch (error) {
+      console.error('Error reporting hazard:', error);
+      Alert.alert('Error', 'Failed to report hazard: ' + error.message);
+    }
   };
 
-  const toggleScanning = () => {
-    setIsScanning(!isScanning);
+  // Function to fetch alerts from nearby drivers
+  const fetchNearbyAlerts = async () => {
+    try {
+      if (!currentLocation) {
+        return;
+      }
+
+      const response = await fetch(
+        `${API_BASE_URL}/api/hazards/nearby?latitude=${currentLocation.latitude}&longitude=${currentLocation.longitude}&radius=5000`,
+        {
+          method: 'GET',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+        }
+      );
+
+      if (!response.ok) {
+        throw new Error(`API error: ${response.status}`);
+      }
+
+      const alerts = await response.json();
+      
+      // Filter out alerts we've already shown
+      const newAlerts = alerts.filter(alert => 
+        !receivedAlerts.some(existing => existing.id === alert.id)
+      );
+
+      if (newAlerts.length > 0) {
+        // Add new alerts to the list
+        setReceivedAlerts(prev => [
+          ...newAlerts.map(alert => ({
+            id: alert.id,
+            text: `${getHazardEmoji(alert.hazardType)} ${alert.description}`,
+            timestamp: new Date(alert.timestamp),
+            distance: alert.distance,
+            type: 'received',
+          })),
+          ...prev.slice(0, 9)
+        ]);
+
+        // Vibrate for new alerts
+        Vibration.vibrate([0, 200, 100, 200]);
+      }
+
+    } catch (error) {
+      console.error('Error fetching nearby alerts:', error);
+    }
+  };
+
+  const getHazardEmoji = (hazardType) => {
+    const emojiMap = {
+      'pothole': '⚠️',
+      'construction': '🚧',
+      'wet_road': '💧',
+      'stopped_vehicle': '🚗',
+      'animal': '🦌',
+      'accident': '🚨',
+      'debris': '🪨',
+    };
+    return emojiMap[hazardType] || '⚠️';
+  };
+
+  // This function will be called by your ML model when a hazard is detected
+  const onHazardDetectedByModel = (hazardType, description) => {
+    reportHazard(hazardType, description);
   };
 
   if (!hasPermission) {
@@ -102,6 +257,10 @@ export default function CameraScreen({ navigation }) {
     );
   }
 
+  const allAlerts = [...detectedHazards, ...receivedAlerts].sort(
+    (a, b) => b.timestamp - a.timestamp
+  ).slice(0, 5);
+
   return (
     <SafeAreaView style={styles.container}>
       <StatusBar barStyle="light-content" backgroundColor="#000000" />
@@ -111,45 +270,66 @@ export default function CameraScreen({ navigation }) {
         style={StyleSheet.absoluteFill}
         device={device}
         isActive={isActive}
-        photo={false}
+        photo={true}
         video={false}
       />
 
       <View style={styles.overlay}>
         <View style={styles.topBar}>
-          <View style={[styles.statusBadge, isScanning && styles.statusBadgeActive]}>
-            <View style={[styles.statusDot, isScanning && styles.statusDotActive]} />
-            <Text style={styles.statusText}>
-              {isScanning ? 'Scanning' : 'Paused'}
-            </Text>
+          <View style={styles.statusBadge}>
+            <View style={styles.statusDotActive} />
+            <Text style={styles.statusText}>Monitoring</Text>
           </View>
-        </View>
-
-        <View style={styles.hazardList}>
-          {detectedHazards.map((hazard) => (
-            <View key={hazard.id} style={styles.hazardItem}>
-              <Text style={styles.hazardText}>{hazard.text}</Text>
-              <Text style={styles.hazardTime}>
-                {hazard.timestamp.toLocaleTimeString()}
-              </Text>
+          {currentLocation && (
+            <View style={styles.locationBadge}>
+              <Text style={styles.locationText}>📍 GPS Active</Text>
             </View>
-          ))}
-          {detectedHazards.length === 0 && (
-            <Text style={styles.noHazardsText}>
-              {isScanning ? 'Monitoring road conditions...' : 'Tap Start to begin scanning'}
-            </Text>
           )}
         </View>
 
+        <View style={styles.alertsContainer}>
+          <Text style={styles.alertsTitle}>Recent Alerts</Text>
+          <View style={styles.alertsList}>
+            {allAlerts.map((alert) => (
+              <View 
+                key={alert.id} 
+                style={[
+                  styles.alertItem,
+                  alert.type === 'detected' ? styles.alertDetected : styles.alertReceived
+                ]}
+              >
+                <View style={styles.alertHeader}>
+                  <Text style={styles.alertText}>{alert.text}</Text>
+                  {alert.type === 'received' && alert.distance && (
+                    <Text style={styles.distanceText}>
+                      {Math.round(alert.distance)}m
+                    </Text>
+                  )}
+                </View>
+                <Text style={styles.alertTime}>
+                  {alert.timestamp.toLocaleTimeString()}
+                </Text>
+                {alert.type === 'received' && (
+                  <Text style={styles.alertSource}>From nearby driver</Text>
+                )}
+              </View>
+            ))}
+            {allAlerts.length === 0 && (
+              <Text style={styles.noAlertsText}>
+                No alerts yet. Monitoring road conditions...
+              </Text>
+            )}
+          </View>
+        </View>
+
+        {/* Manual report button for testing */}
         <View style={styles.bottomBar}>
           <TouchableOpacity
-            style={[styles.scanButton, isScanning && styles.scanButtonActive]}
-            onPress={toggleScanning}
+            style={styles.manualReportButton}
+            onPress={() => reportHazard('pothole', 'Pothole detected')}
             activeOpacity={0.8}
           >
-            <Text style={styles.scanButtonText}>
-              {isScanning ? 'Stop Scanning' : 'Start Scanning'}
-            </Text>
+            <Text style={styles.manualReportText}>🚨 Manual Report</Text>
           </TouchableOpacity>
         </View>
       </View>
@@ -192,27 +372,23 @@ const styles = StyleSheet.create({
   },
   topBar: {
     padding: 20,
+    flexDirection: 'row',
+    justifyContent: 'space-between',
     alignItems: 'flex-start',
   },
   statusBadge: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: 'rgba(0, 0, 0, 0.7)',
+    backgroundColor: 'rgba(76, 175, 80, 0.3)',
     paddingHorizontal: 15,
     paddingVertical: 10,
     borderRadius: 20,
     gap: 8,
   },
-  statusBadgeActive: {
-    backgroundColor: 'rgba(76, 175, 80, 0.3)',
-  },
-  statusDot: {
+  statusDotActive: {
     width: 10,
     height: 10,
     borderRadius: 5,
-    backgroundColor: '#666666',
-  },
-  statusDotActive: {
     backgroundColor: '#4CAF50',
   },
   statusText: {
@@ -220,30 +396,77 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontWeight: '600',
   },
-  hazardList: {
+  locationBadge: {
+    backgroundColor: 'rgba(0, 0, 0, 0.7)',
+    paddingHorizontal: 15,
+    paddingVertical: 10,
+    borderRadius: 20,
+  },
+  locationText: {
+    color: '#ffffff',
+    fontSize: 14,
+    fontWeight: '600',
+  },
+  alertsContainer: {
     flex: 1,
-    justifyContent: 'center',
+    justifyContent: 'flex-end',
     paddingHorizontal: 20,
+    paddingBottom: 20,
+  },
+  alertsTitle: {
+    color: '#ffffff',
+    fontSize: 18,
+    fontWeight: 'bold',
+    marginBottom: 10,
+    textShadowColor: 'rgba(0, 0, 0, 0.75)',
+    textShadowOffset: { width: -1, height: 1 },
+    textShadowRadius: 10,
+  },
+  alertsList: {
     gap: 10,
   },
-  hazardItem: {
-    backgroundColor: 'rgba(255, 59, 48, 0.9)',
+  alertItem: {
     padding: 15,
     borderRadius: 10,
     marginBottom: 10,
   },
-  hazardText: {
+  alertDetected: {
+    backgroundColor: 'rgba(255, 59, 48, 0.9)',
+  },
+  alertReceived: {
+    backgroundColor: 'rgba(255, 152, 0, 0.9)',
+  },
+  alertHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 5,
+  },
+  alertText: {
     color: '#ffffff',
     fontSize: 16,
     fontWeight: 'bold',
-    marginBottom: 5,
+    flex: 1,
   },
-  hazardTime: {
+  distanceText: {
+    color: '#ffffff',
+    fontSize: 14,
+    fontWeight: '600',
+    marginLeft: 10,
+  },
+  alertTime: {
     color: '#ffffff',
     fontSize: 12,
     opacity: 0.8,
   },
-  noHazardsText: {
+  alertSource: {
+    color: '#ffffff',
+    fontSize: 11,
+    opacity: 0.7,
+    fontStyle: 'italic',
+    marginTop: 2,
+  },
+  noAlertsText: {
     color: '#ffffff',
     fontSize: 16,
     textAlign: 'center',
@@ -253,24 +476,20 @@ const styles = StyleSheet.create({
     padding: 20,
     alignItems: 'center',
   },
-  scanButton: {
-    backgroundColor: '#4CAF50',
-    paddingVertical: 18,
-    paddingHorizontal: 50,
-    borderRadius: 30,
+  manualReportButton: {
+    backgroundColor: 'rgba(255, 59, 48, 0.8)',
+    paddingVertical: 15,
+    paddingHorizontal: 30,
+    borderRadius: 25,
     elevation: 5,
-    shadowColor: '#4CAF50',
+    shadowColor: '#ff3b30',
     shadowOffset: { width: 0, height: 4 },
     shadowOpacity: 0.3,
     shadowRadius: 8,
   },
-  scanButtonActive: {
-    backgroundColor: '#f44336',
-    shadowColor: '#f44336',
-  },
-  scanButtonText: {
+  manualReportText: {
     color: '#ffffff',
-    fontSize: 18,
+    fontSize: 16,
     fontWeight: 'bold',
   },
 });
@@ -285,7 +504,8 @@ const styles = StyleSheet.create({
     "@react-navigation/native-stack": "^6.9.13",
     "react-native-vision-camera": "^3.0.0",
     "react-native-safe-area-context": "^4.7.1",
-    "react-native-screens": "^3.24.0"
+    "react-native-screens": "^3.24.0",
+    "@react-native-community/geolocation": "^3.0.6"
   }
 }
 */
