@@ -16,9 +16,10 @@ import {
 } from 'react-native';
 import { Camera, useCameraDevices } from 'react-native-vision-camera';
 import Geolocation from '@react-native-community/geolocation';
+import RNFS from 'react-native-fs';
 
-const API_BASE_URL = 'https://152a7c25bfa4.ngrok-free.app';
-const WS_URL = 'wss://152a7c25bfa4.ngrok-free.app/ws';
+const API_BASE_URL = 'https://c7be1843dccb.ngrok-free.app';
+const WS_URL = 'wss://c7be1843dccb.ngrok-free.app/ws';
 
 export default function CameraScreen({ navigation }) {
   const [hasPermission, setHasPermission] = useState(false);
@@ -214,125 +215,118 @@ export default function CameraScreen({ navigation }) {
   };
 
   const reportHazard = async (hazardType, description) => {
-    try {
-      const position = await new Promise((resolve, reject) => {
-        Geolocation.getCurrentPosition(
-          (position) => {
-            setCurrentLocation({
-              latitude: position.coords.latitude,
-              longitude: position.coords.longitude,
-            });
-            resolve(position);
-          },
-          (error) => {
-            console.error('Error getting location:', error);
-            reject(error);
-          },
-          { enableHighAccuracy: true, timeout: 15000, maximumAge: 10000 }
-        );
-      });
+  try {
+    // Get current GPS location
+    const position = await new Promise((resolve, reject) => {
+      Geolocation.getCurrentPosition(
+        (position) => {
+          setCurrentLocation({
+            latitude: position.coords.latitude,
+            longitude: position.coords.longitude,
+          });
+          resolve(position);
+        },
+        (error) => {
+          console.error('Error getting location:', error);
+          reject(error);
+        },
+        { enableHighAccuracy: true, timeout: 15000, maximumAge: 10000 }
+      );
+    });
 
-      const currentLocation = {
-        latitude: position.coords.latitude,
-        longitude: position.coords.longitude,
-      };
+    const currentLocation = {
+      latitude: position.coords.latitude,
+      longitude: position.coords.longitude,
+    };
 
-      if (!camera.current) {
-        throw new Error('Camera not ready');
-      }
+    if (!camera.current) {
+      throw new Error('Camera not ready');
+    }
 
-      if (!currentLocation) {
-        throw new Error('Location not available');
-      }
+    // Take photo
+    const photo = await camera.current.takePhoto({
+      qualityPrioritization: 'balanced',
+      flash: 'off',
+    });
 
-      const photo = await camera.current.takePhoto({
-        qualityPrioritization: 'balanced',
-        flash: 'off',
-      });
+    console.log('📸 Photo captured:', photo.path);
 
-      // Read photo as base64
-      const response = await fetch(`file://${photo.path}`);
-      const blob = await response.blob();
-      const base64Photo = await new Promise((resolve, reject) => {
-        const reader = new FileReader();
-        reader.onloadend = () => resolve(reader.result);
-        reader.onerror = reject;
-        reader.readAsDataURL(blob);
-      });
+    // Prepare hazard data (no image yet)
+    const hazardData = {
+      latitude: currentLocation.latitude,
+      longitude: currentLocation.longitude,
+      hazardType: hazardType,
+      description: description,
+      timestamp: new Date().toISOString(),
+    };
 
-      const hazardData = {
+    // ✅ Send real-time hazard alert instantly (no image)
+    const wsSent = sendHazardAlert(hazardData);
+
+    // ✅ Upload photo separately to backend for persistence
+    const formData = new FormData();
+    formData.append('photo', {
+      uri: photo.path,
+      type: 'image/jpeg',
+      name: `hazard_${Date.now()}.jpg`,
+    });
+    formData.append('latitude', currentLocation.latitude.toString());
+    formData.append('longitude', currentLocation.longitude.toString());
+    formData.append('hazardType', hazardType);
+    formData.append('description', description);
+    formData.append('timestamp', hazardData.timestamp);
+
+    const photoBase64 = await RNFS.readFile(photo.path, 'base64');
+
+    const token = await AsyncStorage.getItem('jwt_token');
+
+    // Send to backend
+    const response = await fetch(`${API_BASE_URL}/api/hazards/report`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${token}`,  // ✅ Add this line
+      },
+      body: JSON.stringify({
         latitude: currentLocation.latitude,
         longitude: currentLocation.longitude,
-        hazardType: hazardType,
-        description: description,
-        timestamp: new Date().toISOString(),
-        photo: base64Photo, // Send base64 encoded photo
-      };
-
-      // Send immediate alert via WebSocket with base64 photo
-      const wsSent = sendHazardAlert({
-        latitude: hazardData.latitude,
-        longitude: hazardData.longitude,
-        hazardType: hazardData.hazardType,
-        description: hazardData.description,
+        hazardType,
+        description,
         timestamp: hazardData.timestamp,
-        photo: base64Photo,
-      });
+        photo: `data:image/jpeg;base64,${photoBase64}`,
+      }),
+    });
 
-      // Also upload to backend via HTTP for persistence
-      const formData = new FormData();
-      formData.append('photo', {
-        uri: photo.path,
-        type: 'image/jpeg',
-        name: `hazard_${Date.now()}.jpg`,
-      });
-      formData.append('latitude', hazardData.latitude.toString());
-      formData.append('longitude', hazardData.longitude.toString());
-      formData.append('hazardType', hazardData.hazardType);
-      formData.append('description', hazardData.description);
-      formData.append('timestamp', hazardData.timestamp);
+    // ✅ Add to local detected hazards
+    setDetectedHazards(prev => [
+      {
+        id: Date.now(),
+        text: `${getHazardEmoji(hazardType)} ${description}`,
+        timestamp: new Date(),
+        type: 'detected',
+        hazardType: hazardType,
+        photoUri: `file://${photo.path}`,
+        latitude: currentLocation.latitude,
+        longitude: currentLocation.longitude,
+      },
+      ...prev.slice(0, 4),
+    ]);
 
-      fetch(`${API_BASE_URL}/api/hazards/report`, {
-        method: 'POST',
-        body: formData,
-      })
-        .then(response => {
-          if (response.ok) {
-            console.log('Hazard photo uploaded successfully');
-          }
-        })
-        .catch(error => {
-          console.error('Error uploading photo:', error);
-        });
+    // Vibrate and show success
+    Vibration.vibrate(200);
 
-      // Add to local detected hazards with photo
-      setDetectedHazards(prev => [
-        {
-          id: Date.now(),
-          text: `${getHazardEmoji(hazardType)} ${description}`,
-          timestamp: new Date(),
-          type: 'detected',
-          hazardType: hazardType,
-          photoUri: `file://${photo.path}`,
-          latitude: currentLocation.latitude,
-          longitude: currentLocation.longitude,
-        },
-        ...prev.slice(0, 4)
-      ]);
-
-      Vibration.vibrate(200);
-
-      if (wsSent) {
-        Alert.alert('Success', 'Hazard reported and alert sent to nearby drivers');
-      } else {
-        Alert.alert('Partial Success', 'Hazard saved but real-time alert may be delayed');
-      }
-
-    } catch (error) {
-      console.error('Error reporting hazard:', error);
-      Alert.alert('Error', 'Failed to report hazard: ' + error.message);
+    if (wsSent) {
+      Alert.alert('✅ Success', 'Hazard alert sent to nearby drivers');
+    } else {
+      Alert.alert('⚠️ Partial Success', 'Photo saved, but alert may be delayed');
     }
-  };
+
+  } catch (error) {
+    console.error('❌ Error reporting hazard:', error);
+    Alert.alert('Error', 'Failed to report hazard: ' + error.message);
+  }
+};
+
 
   const getHazardEmoji = (hazardType) => {
     const emojiMap = {
@@ -485,7 +479,7 @@ export default function CameraScreen({ navigation }) {
         <View style={styles.bottomBar}>
           <TouchableOpacity
             style={styles.manualReportButton}
-            onPress={() => reportHazard('pothole', 'Pothole detected')}
+            onPress={async () => await reportHazard('pothole', 'Pothole detected')}
             activeOpacity={0.8}
           >
             <Text style={styles.manualReportText}>🚨 Manual Report</Text>
