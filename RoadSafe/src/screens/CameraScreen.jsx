@@ -18,8 +18,8 @@ import { Camera, useCameraDevices } from 'react-native-vision-camera';
 import Geolocation from '@react-native-community/geolocation';
 import RNFS from 'react-native-fs';
 
-const API_BASE_URL = 'https://c7be1843dccb.ngrok-free.app';
-const WS_URL = 'wss://c7be1843dccb.ngrok-free.app/ws';
+const API_BASE_URL = 'https://34606c8b81e8.ngrok-free.app';
+const WS_URL = 'wss://34606c8b81e8.ngrok-free.app/ws';
 
 export default function CameraScreen({ navigation }) {
   const [hasPermission, setHasPermission] = useState(false);
@@ -482,7 +482,7 @@ export default function CameraScreen({ navigation }) {
             onPress={async () => await reportHazard('pothole', 'Pothole detected')}
             activeOpacity={0.8}
           >
-            <Text style={styles.manualReportText}>🚨 Manual Report</Text>
+            {/* <Text style={styles.manualReportText}>🚨 Manual Report</Text> */}
           </TouchableOpacity>
         </View>
       </View>
@@ -746,16 +746,16 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   manualReportButton: {
-    backgroundColor: 'rgba(255, 59, 48, 0.8)',
-    paddingVertical: 15,
-    paddingHorizontal: 30,
-    borderRadius: 25,
-    elevation: 5,
-    shadowColor: '#ff3b30',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.3,
-    shadowRadius: 8,
-  },
+  backgroundColor: 'transparent',
+  paddingVertical: 15,
+  paddingHorizontal: 30,
+  borderRadius: 25,
+  elevation: 5,
+  // shadowColor: '#ff3b30',
+  // shadowOffset: { width: 0, height: 4 },
+  // shadowOpacity: 0.3,
+  // shadowRadius: 8,
+},
   manualReportText: {
     color: '#ffffff',
     fontSize: 16,
