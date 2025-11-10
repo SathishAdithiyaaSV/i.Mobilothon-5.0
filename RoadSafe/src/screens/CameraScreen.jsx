@@ -17,9 +17,18 @@ import {
 import { Camera, useCameraDevices } from 'react-native-vision-camera';
 import Geolocation from '@react-native-community/geolocation';
 import RNFS from 'react-native-fs';
+import { useTensorflowModel } from 'react-native-fast-tflite';
+import { useResizePlugin } from 'vision-camera-resize-plugin';
+import { useFrameProcessor } from 'react-native-vision-camera';
+import { Worklets } from 'react-native-worklets-core';
 
-const API_BASE_URL = 'https://34606c8b81e8.ngrok-free.app';
-const WS_URL = 'wss://34606c8b81e8.ngrok-free.app/ws';
+const API_BASE_URL = 'https://bfcddb2695f3.ngrok-free.app';
+const WS_URL = 'wss://bfcddb2695f3.ngrok-free.app/ws';
+
+const mapLabelToHazard = (index) => {
+  const labels = ['pothole', 'construction', 'wet_road', 'accident', 'debris'];
+  return labels[index] || null;
+};
 
 export default function CameraScreen({ navigation }) {
   const [hasPermission, setHasPermission] = useState(false);
@@ -350,6 +359,40 @@ export default function CameraScreen({ navigation }) {
     setModalVisible(true);
   };
 
+    // Load the TFLite model from assets
+  const modelHook = useTensorflowModel(require('../../assets/models/model.tflite'));
+  const { resize } = useResizePlugin();
+  const model = modelHook.state === 'loaded' ? modelHook.model : null;
+
+  const frameProcessor = useFrameProcessor((frame) => {
+  'worklet';
+  if (model == null) return;
+
+  // 1. Resize the frame to the model’s expected input size (example: 224x224)
+  const resized = resize(frame, {
+    scale: { width: 224, height: 224 },
+    pixelFormat: 'rgb',
+    dataType: 'uint8',
+  });
+
+  // 2. Run model inference synchronously
+  const outputs = model.runSync([resized]);
+
+  // 3. Interpret the output (depends on your model)
+  // Example: classification with labels
+  if (outputs && outputs[0]) {
+    const scores = outputs[0];
+    const maxScoreIndex = scores.indexOf(Math.max(...scores));
+    console.log('🔍 Detected:', maxScoreIndex);
+
+    // You can now trigger a hazard report based on class
+    const detectedHazardType = mapLabelToHazard(maxScoreIndex);
+    if (detectedHazardType) {
+      Worklets.runOnJS(() => onHazardDetectedByModel(detectedHazardType, 'AI Detected'));
+    }
+  }
+}, [model]);
+
   if (!hasPermission) {
     return (
       <SafeAreaView style={styles.container}>
@@ -393,7 +436,10 @@ export default function CameraScreen({ navigation }) {
         isActive={isActive}
         photo={true}
         video={false}
+        frameProcessor={frameProcessor}
+        frameProcessorFps={2} // optional: process every 0.5s
       />
+
 
       <View style={styles.overlay}>
         <View style={styles.topBar}>
