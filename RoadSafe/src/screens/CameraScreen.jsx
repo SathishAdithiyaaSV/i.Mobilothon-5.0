@@ -17,9 +17,10 @@ import {
 import { Camera, useCameraDevices } from 'react-native-vision-camera';
 import Geolocation from '@react-native-community/geolocation';
 import RNFS from 'react-native-fs';
+import { useTensorflowModel } from 'react-native-fast-tflite';
 
-const API_BASE_URL = 'https://34606c8b81e8.ngrok-free.app';
-const WS_URL = 'wss://34606c8b81e8.ngrok-free.app/ws';
+const API_BASE_URL = 'https://0c5e101966fb.ngrok-free.app';
+const WS_URL = 'wss://0c5e101966fb.ngrok-free.app/ws';
 
 export default function CameraScreen({ navigation }) {
   const [hasPermission, setHasPermission] = useState(false);
@@ -36,6 +37,10 @@ export default function CameraScreen({ navigation }) {
   const reconnectTimeout = useRef(null);
   const devices = useCameraDevices();
   const device = devices[0];
+
+  const modelHook = useTensorflowModel(require('../../assets/models/model.tflite'));
+  const model = modelHook.state === 'loaded' ? modelHook.model : null;
+
 
   useEffect(() => {
     console.log(devices);
@@ -63,6 +68,40 @@ export default function CameraScreen({ navigation }) {
 
     return () => clearInterval(locationInterval);
   }, []);
+
+  useEffect(() => {
+  if (!model || !camera.current) return;
+
+  // Run AI detection every 5 seconds
+  const interval = setInterval(async () => {
+    try {
+      console.log("Capturing");
+      // Capture a frame
+      const photo = await camera.current.takePhoto({
+        qualityPrioritization: 'speed',
+      });
+      console.log("Captured");
+
+      // Read the photo as bytes (convert to tensor input)
+      const photoData = await RNFS.readFile(photo.path, 'base64');
+      
+      // TODO: preprocessImage(photoData) -> convert to Uint8Array or tensor input shape
+      // This depends on your model input (e.g., 224x224 RGB).
+      // For now, just mock detection logic to show integration:
+      
+      const mockOutput = 0.8; // fake model output
+      if (mockOutput > 0.7) {
+        onHazardDetectedByModel('pothole', 'AI Detected Pothole');
+      }
+
+    } catch (err) {
+      console.error('AI detection error:', err);
+    }
+  }, 10000); // every 5s
+
+  return () => clearInterval(interval);
+}, [model, camera.current]);
+
 
   useEffect(() => {
     if (currentLocation && ws.current && ws.current.readyState === WebSocket.OPEN) {

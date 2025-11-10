@@ -1,11 +1,22 @@
 const { getDefaultConfig, mergeConfig } = require('@react-native/metro-config');
+const path = require('path');
 
-/**
- * Metro configuration
- * https://reactnative.dev/docs/metro
- *
- * @type {import('@react-native/metro-config').MetroConfig}
- */
-const config = {};
+const defaultConfig = getDefaultConfig(__dirname);
 
-module.exports = mergeConfig(getDefaultConfig(__dirname), config);
+// Allow .tflite and other AI model files to be bundled
+defaultConfig.resolver.assetExts.push('tflite', 'bin', 'pb', 'onnx');
+
+const config = {
+  transformer: {
+    // Make sure Metro doesn’t try to parse binary files
+    getTransformOptions: async () => ({
+      transform: {
+        experimentalImportSupport: false,
+        inlineRequires: true,
+      },
+    }),
+  },
+  resolver: defaultConfig.resolver,
+};
+
+module.exports = mergeConfig(defaultConfig, config);
