@@ -18,9 +18,10 @@ import { Camera, useCameraDevices } from 'react-native-vision-camera';
 import Geolocation from '@react-native-community/geolocation';
 import RNFS from 'react-native-fs';
 import { useTensorflowModel } from 'react-native-fast-tflite';
+import { preprocessImage } from '../utils/preprocessImage.js';
 
-const API_BASE_URL = 'https://0c5e101966fb.ngrok-free.app';
-const WS_URL = 'wss://0c5e101966fb.ngrok-free.app/ws';
+const API_BASE_URL = 'https://9ea46ee4c33f.ngrok-free.app';
+const WS_URL = 'wss://9ea46ee4c33f.ngrok-free.app/ws';
 
 export default function CameraScreen({ navigation }) {
   const [hasPermission, setHasPermission] = useState(false);
@@ -88,8 +89,15 @@ export default function CameraScreen({ navigation }) {
       // TODO: preprocessImage(photoData) -> convert to Uint8Array or tensor input shape
       // This depends on your model input (e.g., 224x224 RGB).
       // For now, just mock detection logic to show integration:
+
+      const inputTensor = await preprocessImage(photo.path, 'uint8');
+
+      // Run inference
+      const outputs = model.runSync([inputTensor]);
+
+      console.log("✅ Model outputs:", outputs);
       
-      const mockOutput = 0.8; // fake model output
+      const mockOutput = 0.6; // fake model output
       if (mockOutput > 0.7) {
         onHazardDetectedByModel('pothole', 'AI Detected Pothole');
       }
@@ -97,7 +105,7 @@ export default function CameraScreen({ navigation }) {
     } catch (err) {
       console.error('AI detection error:', err);
     }
-  }, 10000); // every 5s
+  }, 3000); // every 5s
 
   return () => clearInterval(interval);
 }, [model, camera.current]);
