@@ -294,11 +294,52 @@ async def login(data: UserLogin):
 # ============================================
 @app.post("/api/hazards/report")
 async def report_hazard(hazard: HazardReport, current_user: dict = Depends(get_current_user)):
-    """Report hazard using JSON + base64 image"""
+    """Report hazard using JSON + base64 image with deduplication logic"""
     try:
         hazard_id = str(uuid.uuid4())
         photo_url = save_base64_image(hazard.photo, hazard_id) if hazard.photo else None
 
+        # Deduplication parameters
+        MAX_DISTANCE_METERS = 50   # ~50m radius
+        TIME_WINDOW_MINUTES = 2    # ignore duplicates within last 2 min
+
+        # Find similar hazards nearby
+        recent_time = datetime.utcnow() - timedelta(minutes=TIME_WINDOW_MINUTES)
+        nearby_hazard = await db.hazards.find_one({
+            "hazardType": hazard.hazardType,
+            "createdAt": {"$gte": recent_time},
+            "location": {
+                "$nearSphere": {
+                    "$geometry": {"type": "Point", "coordinates": [hazard.longitude, hazard.latitude]},
+                    "$maxDistance": MAX_DISTANCE_METERS
+                }
+            }
+        })
+
+        if nearby_hazard:
+            # ✅ Duplicate found → increment its reportCount and maybe mark verified
+            await db.hazards.update_one(
+                {"_id": nearby_hazard["_id"]},
+                {"$inc": {"reportCount": 1},
+                 "$set": {"lastReportedAt": datetime.utcnow()}}
+            )
+
+            # Optionally mark verified if multiple reports
+            if nearby_hazard.get("reportCount", 1) + 1 >= 3:
+                await db.hazards.update_one(
+                    {"_id": nearby_hazard["_id"]},
+                    {"$set": {"verified": True}}
+                )
+
+            print(f"✅ Duplicate hazard ignored (merged with {nearby_hazard['id']})")
+            return {
+                "success": True,
+                "message": "Duplicate hazard merged",
+                "hazard_id": nearby_hazard["id"],
+                "photoUrl": nearby_hazard.get("photoUrl")
+            }
+
+        # No duplicate found → insert new
         hazard_doc = {
             "id": hazard_id,
             "latitude": hazard.latitude,
@@ -373,21 +414,60 @@ async def websocket_endpoint(websocket: WebSocket):
 
             elif t == "hazard_report":
                 hazard_id = str(uuid.uuid4())
+                lat, lon = p["latitude"], p["longitude"]
+
+                MAX_DISTANCE_METERS = 50
+                TIME_WINDOW_MINUTES = 2
+                recent_time = datetime.utcnow() - timedelta(minutes=TIME_WINDOW_MINUTES)
+
+                nearby = await db.hazards.find_one({
+                    "hazardType": p["hazardType"],
+                    "createdAt": {"$gte": recent_time},
+                    "location": {
+                        "$nearSphere": {
+                            "$geometry": {"type": "Point", "coordinates": [lon, lat]},
+                            "$maxDistance": MAX_DISTANCE_METERS
+                        }
+                    }
+                })
+
+                if nearby:
+                    await db.hazards.update_one(
+                        {"_id": nearby["_id"]},
+                        {"$inc": {"reportCount": 1}, "$set": {"lastReportedAt": datetime.utcnow()}}
+                    )
+                    if nearby.get("reportCount", 1) + 1 >= 3:
+                        await db.hazards.update_one(
+                            {"_id": nearby["_id"]},
+                            {"$set": {"verified": True}}
+                        )
+                    print(f"Duplicate hazard merged with {nearby['id']}")
+                    await manager.send_personal_message(
+                        {"type": "hazard_ack", "payload": {"hazard_id": nearby["id"], "merged": True}},
+                        user_id
+                    )
+                    continue
+
                 photo_url = save_base64_image(p.get("photo", ""), hazard_id) if p.get("photo") else None
                 hazard_doc = {
                     "id": hazard_id,
-                    "latitude": p["latitude"],
-                    "longitude": p["longitude"],
+                    "latitude": lat,
+                    "longitude": lon,
                     "hazardType": p["hazardType"],
                     "description": p["description"],
                     "timestamp": p["timestamp"],
                     "photoUrl": photo_url,
                     "reporter_id": user_id,
                     "createdAt": datetime.utcnow(),
+                    "reportCount": 1,
+                    "verified": False,
+                    "location": {"type": "Point", "coordinates": [lon, lat]}
                 }
+
                 await db.hazards.insert_one(hazard_doc)
-                await manager.broadcast_hazard_to_nearby(hazard_doc, {"latitude": p["latitude"], "longitude": p["longitude"]})
+                await manager.broadcast_hazard_to_nearby(hazard_doc, {"latitude": lat, "longitude": lon})
                 await manager.send_personal_message({"type": "hazard_ack", "payload": {"hazard_id": hazard_id}}, user_id)
+
     except WebSocketDisconnect:
         manager.disconnect(user_id)
     except Exception as e:

@@ -20,8 +20,21 @@ import RNFS from 'react-native-fs';
 import { useTensorflowModel } from 'react-native-fast-tflite';
 import { preprocessImage } from '../utils/preprocessImage.js';
 
-const API_BASE_URL = 'https://9ea46ee4c33f.ngrok-free.app';
-const WS_URL = 'wss://9ea46ee4c33f.ngrok-free.app/ws';
+const API_BASE_URL = 'https://5d26c90e8da3.ngrok-free.app';
+const WS_URL = 'wss://5d26c90e8da3.ngrok-free.app/ws';
+
+// Utility: compute distance (in meters) between two coordinates
+function getDistance(lat1, lon1, lat2, lon2) {
+  const R = 6371e3; // Earth radius in meters
+  const toRad = (deg) => deg * (Math.PI / 180);
+  const dLat = toRad(lat2 - lat1);
+  const dLon = toRad(lon2 - lon1);
+  const a =
+    Math.sin(dLat / 2) ** 2 +
+    Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) *
+    Math.sin(dLon / 2) ** 2;
+  return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+}
 
 export default function CameraScreen({ navigation }) {
   const [hasPermission, setHasPermission] = useState(false);
@@ -35,6 +48,7 @@ export default function CameraScreen({ navigation }) {
   
   const camera = useRef(null);
   const ws = useRef(null);
+  const lastDetectedHazards = useRef({});
   const reconnectTimeout = useRef(null);
   const devices = useCameraDevices();
   const device = devices[0];
@@ -70,45 +84,66 @@ export default function CameraScreen({ navigation }) {
     return () => clearInterval(locationInterval);
   }, []);
 
-  useEffect(() => {
+useEffect(() => {
   if (!model || !camera.current) return;
 
-  // Run AI detection every 5 seconds
   const interval = setInterval(async () => {
     try {
-      console.log("Capturing");
-      // Capture a frame
+      if (!currentLocation) return; // skip if GPS not yet available
+
+      console.log("Capturing...");
       const photo = await camera.current.takePhoto({
         qualityPrioritization: 'speed',
       });
       console.log("Captured");
 
-      // Read the photo as bytes (convert to tensor input)
-      const photoData = await RNFS.readFile(photo.path, 'base64');
-      
-      // TODO: preprocessImage(photoData) -> convert to Uint8Array or tensor input shape
-      // This depends on your model input (e.g., 224x224 RGB).
-      // For now, just mock detection logic to show integration:
-
       const inputTensor = await preprocessImage(photo.path, 'uint8');
-
-      // Run inference
       const outputs = model.runSync([inputTensor]);
 
-      console.log("✅ Model outputs:", outputs);
-      
-      const mockOutput = 0.6; // fake model output
+      console.log(outputs);
+
+      const mockOutput = 0.8; // replace with real model output later
+
       if (mockOutput > 0.7) {
-        onHazardDetectedByModel('pothole', 'AI Detected Pothole');
+        const hazardType = 'pothole';
+        const now = Date.now();
+        const cooldownMs = 20000; // 20 seconds
+        const last = lastDetectedHazards.current[hazardType];
+
+        // Prevent duplicate detection based on time + distance
+        if (
+          last &&
+          now - last.timestamp < cooldownMs &&
+          getDistance(
+            last.latitude,
+            last.longitude,
+            currentLocation.latitude,
+            currentLocation.longitude
+          ) < 30 // within 30 meters
+        ) {
+          console.log(`⏸️ Skipping duplicate ${hazardType} detection`);
+          return;
+        }
+
+        // Save last detection
+        lastDetectedHazards.current[hazardType] = {
+          timestamp: now,
+          latitude: currentLocation.latitude,
+          longitude: currentLocation.longitude,
+        };
+
+        console.log(`✅ New ${hazardType} detected and reported`);
+        onHazardDetectedByModel(hazardType, 'AI Detected Pothole');
       }
 
     } catch (err) {
       console.error('AI detection error:', err);
     }
-  }, 3000); // every 5s
+  }, 3000);
 
   return () => clearInterval(interval);
-}, [model, camera.current]);
+}, [model, camera.current, currentLocation]);
+
 
 
   useEffect(() => {

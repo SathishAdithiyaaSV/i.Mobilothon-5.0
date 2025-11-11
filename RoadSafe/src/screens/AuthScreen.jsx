@@ -14,7 +14,7 @@ import {
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
 // Replace with your actual backend URL
-const API_BASE = 'https://9ea46ee4c33f.ngrok-free.app';
+const API_BASE = 'https://5d26c90e8da3.ngrok-free.app';
 
 const loginAPI = async (email, password) => {
   const response = await fetch(`${API_BASE}/auth/login`, {
