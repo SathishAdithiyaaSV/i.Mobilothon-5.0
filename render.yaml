@@ -1,0 +1,13 @@
+services:
+  - type: web
+    name: i-Mobilothon-backend
+    env: python
+    plan: free
+    rootDir: backend
+    buildCommand: pip install -r requirements.txt
+    startCommand: gunicorn -k uvicorn.workers.UvicornWorker main:app
+    autoDeploy: true
+    allowWS: true  # 👈 enables WebSockets
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.11
