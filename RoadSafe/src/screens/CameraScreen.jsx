@@ -14,14 +14,15 @@ import {
   ScrollView,
   Dimensions,
 } from 'react-native';
+import MapView, { Marker, Circle } from 'react-native-maps';
 import { Camera, useCameraDevices } from 'react-native-vision-camera';
 import Geolocation from '@react-native-community/geolocation';
 import RNFS from 'react-native-fs';
 import { useTensorflowModel } from 'react-native-fast-tflite';
 import { preprocessImage } from '../utils/preprocessImage.js';
 
-const API_BASE_URL = 'https://5d26c90e8da3.ngrok-free.app';
-const WS_URL = 'wss://5d26c90e8da3.ngrok-free.app/ws';
+const API_BASE_URL = 'https://58db7ef748f9.ngrok-free.app';
+const WS_URL = 'wss://58db7ef748f9.ngrok-free.app/ws';
 
 // Utility: compute distance (in meters) between two coordinates
 function getDistance(lat1, lon1, lat2, lon2) {
@@ -36,7 +37,7 @@ function getDistance(lat1, lon1, lat2, lon2) {
   return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
 }
 
-export default function CameraScreen({ navigation }) {
+export default function MapScreen({ navigation }) {
   const [hasPermission, setHasPermission] = useState(false);
   const [isActive, setIsActive] = useState(true);
   const [detectedHazards, setDetectedHazards] = useState([]);
@@ -45,8 +46,15 @@ export default function CameraScreen({ navigation }) {
   const [wsConnected, setWsConnected] = useState(false);
   const [selectedAlert, setSelectedAlert] = useState(null);
   const [modalVisible, setModalVisible] = useState(false);
+  const [region, setRegion] = useState({
+    latitude: 12.9716,
+    longitude: 77.5946,
+    latitudeDelta: 0.01,
+    longitudeDelta: 0.01,
+  });
   
   const camera = useRef(null);
+  const mapRef = useRef(null);
   const ws = useRef(null);
   const lastDetectedHazards = useRef({});
   const reconnectTimeout = useRef(null);
@@ -55,7 +63,6 @@ export default function CameraScreen({ navigation }) {
 
   const modelHook = useTensorflowModel(require('../../assets/models/model.tflite'));
   const model = modelHook.state === 'loaded' ? modelHook.model : null;
-
 
   useEffect(() => {
     console.log(devices);
@@ -84,71 +91,80 @@ export default function CameraScreen({ navigation }) {
     return () => clearInterval(locationInterval);
   }, []);
 
-useEffect(() => {
-  if (!model || !camera.current) return;
+  useEffect(() => {
+    if (!model || !camera.current) return;
 
-  const interval = setInterval(async () => {
-    try {
-      if (!currentLocation) return; // skip if GPS not yet available
+    const interval = setInterval(async () => {
+      try {
+        if (!currentLocation) return; // skip if GPS not yet available
 
-      console.log("Capturing...");
-      const photo = await camera.current.takePhoto({
-        qualityPrioritization: 'speed',
-      });
-      console.log("Captured");
+        console.log("Capturing...");
+        const photo = await camera.current.takePhoto({
+          qualityPrioritization: 'speed',
+        });
+        console.log("Captured");
 
-      const inputTensor = await preprocessImage(photo.path, 'uint8');
-      const outputs = model.runSync([inputTensor]);
+        const inputTensor = await preprocessImage(photo.path, 'uint8');
+        const outputs = model.runSync([inputTensor]);
 
-      console.log(outputs);
+        console.log(outputs);
 
-      const mockOutput = 0.8; // replace with real model output later
+        const mockOutput = 0.8; // replace with real model output later
 
-      if (mockOutput > 0.7) {
-        const hazardType = 'pothole';
-        const now = Date.now();
-        const cooldownMs = 20000; // 20 seconds
-        const last = lastDetectedHazards.current[hazardType];
+        if (mockOutput > 0.7) {
+          const hazardType = 'pothole';
+          const now = Date.now();
+          const cooldownMs = 20000; // 20 seconds
+          const last = lastDetectedHazards.current[hazardType];
 
-        // Prevent duplicate detection based on time + distance
-        if (
-          last &&
-          now - last.timestamp < cooldownMs &&
-          getDistance(
-            last.latitude,
-            last.longitude,
-            currentLocation.latitude,
-            currentLocation.longitude
-          ) < 30 // within 30 meters
-        ) {
-          console.log(`⏸️ Skipping duplicate ${hazardType} detection`);
-          return;
+          // Prevent duplicate detection based on time + distance
+          if (
+            last &&
+            now - last.timestamp < cooldownMs &&
+            getDistance(
+              last.latitude,
+              last.longitude,
+              currentLocation.latitude,
+              currentLocation.longitude
+            ) < 30 // within 30 meters
+          ) {
+            console.log(`⏸️ Skipping duplicate ${hazardType} detection`);
+            return;
+          }
+
+          // Save last detection
+          lastDetectedHazards.current[hazardType] = {
+            timestamp: now,
+            latitude: currentLocation.latitude,
+            longitude: currentLocation.longitude,
+          };
+
+          console.log(`✅ New ${hazardType} detected and reported`);
+          onHazardDetectedByModel(hazardType, 'AI Detected Pothole');
         }
 
-        // Save last detection
-        lastDetectedHazards.current[hazardType] = {
-          timestamp: now,
-          latitude: currentLocation.latitude,
-          longitude: currentLocation.longitude,
-        };
-
-        console.log(`✅ New ${hazardType} detected and reported`);
-        onHazardDetectedByModel(hazardType, 'AI Detected Pothole');
+      } catch (err) {
+        console.error('AI detection error:', err);
       }
+    }, 3000);
 
-    } catch (err) {
-      console.error('AI detection error:', err);
-    }
-  }, 3000);
-
-  return () => clearInterval(interval);
-}, [model, camera.current, currentLocation]);
-
-
+    return () => clearInterval(interval);
+  }, [model, camera.current, currentLocation]);
 
   useEffect(() => {
     if (currentLocation && ws.current && ws.current.readyState === WebSocket.OPEN) {
       sendLocationUpdate(currentLocation);
+    }
+  }, [currentLocation]);
+
+  useEffect(() => {
+    if (currentLocation && mapRef.current) {
+      mapRef.current.animateToRegion({
+        latitude: currentLocation.latitude,
+        longitude: currentLocation.longitude,
+        latitudeDelta: 0.01,
+        longitudeDelta: 0.01,
+      }, 1000);
     }
   }, [currentLocation]);
 
@@ -224,7 +240,6 @@ useEffect(() => {
     const alreadyExists = receivedAlerts.some(existing => existing.id === alert.id);
     
     if (!alreadyExists) {
-      // Fetch the photo from backend if photoUrl is provided
       const newAlert = {
         id: alert.id || Date.now(),
         text: `${getHazardEmoji(alert.hazardType)} ${alert.description}`,
@@ -292,123 +307,102 @@ useEffect(() => {
       (error) => {
         console.error('Error getting location:', error);
       },
-      { enableHighAccuracy: true, timeout: 15000, maximumAge: 10000 }
+      { enableHighAccuracy: false, timeout: 15000, maximumAge: 10000 }
     );
   };
 
   const reportHazard = async (hazardType, description) => {
-  try {
-    // Get current GPS location
-    const position = await new Promise((resolve, reject) => {
-      Geolocation.getCurrentPosition(
-        (position) => {
-          setCurrentLocation({
-            latitude: position.coords.latitude,
-            longitude: position.coords.longitude,
-          });
-          resolve(position);
-        },
-        (error) => {
-          console.error('Error getting location:', error);
-          reject(error);
-        },
-        { enableHighAccuracy: true, timeout: 15000, maximumAge: 10000 }
-      );
-    });
+    try {
+      const position = await new Promise((resolve, reject) => {
+        Geolocation.getCurrentPosition(
+          (position) => {
+            setCurrentLocation({
+              latitude: position.coords.latitude,
+              longitude: position.coords.longitude,
+            });
+            resolve(position);
+          },
+          (error) => {
+            console.error('Error getting location:', error);
+            reject(error);
+          },
+          { enableHighAccuracy: false, timeout: 15000, maximumAge: 10000 }
+        );
+      });
 
-    const currentLocation = {
-      latitude: position.coords.latitude,
-      longitude: position.coords.longitude,
-    };
+      const currentLocation = {
+        latitude: position.coords.latitude,
+        longitude: position.coords.longitude,
+      };
 
-    if (!camera.current) {
-      throw new Error('Camera not ready');
-    }
+      if (!camera.current) {
+        throw new Error('Camera not ready');
+      }
 
-    // Take photo
-    const photo = await camera.current.takePhoto({
-      qualityPrioritization: 'balanced',
-      flash: 'off',
-    });
+      const photo = await camera.current.takePhoto({
+        qualityPrioritization: 'balanced',
+        flash: 'off',
+      });
 
-    console.log('📸 Photo captured:', photo.path);
+      console.log('📸 Photo captured:', photo.path);
 
-    // Prepare hazard data (no image yet)
-    const hazardData = {
-      latitude: currentLocation.latitude,
-      longitude: currentLocation.longitude,
-      hazardType: hazardType,
-      description: description,
-      timestamp: new Date().toISOString(),
-    };
-
-    // ✅ Send real-time hazard alert instantly (no image)
-    const wsSent = sendHazardAlert(hazardData);
-
-    // ✅ Upload photo separately to backend for persistence
-    const formData = new FormData();
-    formData.append('photo', {
-      uri: photo.path,
-      type: 'image/jpeg',
-      name: `hazard_${Date.now()}.jpg`,
-    });
-    formData.append('latitude', currentLocation.latitude.toString());
-    formData.append('longitude', currentLocation.longitude.toString());
-    formData.append('hazardType', hazardType);
-    formData.append('description', description);
-    formData.append('timestamp', hazardData.timestamp);
-
-    const photoBase64 = await RNFS.readFile(photo.path, 'base64');
-
-    const token = await AsyncStorage.getItem('jwt_token');
-
-    // Send to backend
-    const response = await fetch(`${API_BASE_URL}/api/hazards/report`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${token}`,  // ✅ Add this line
-      },
-      body: JSON.stringify({
+      const hazardData = {
         latitude: currentLocation.latitude,
         longitude: currentLocation.longitude,
-        hazardType,
-        description,
-        timestamp: hazardData.timestamp,
-        photo: `data:image/jpeg;base64,${photoBase64}`,
-      }),
-    });
-
-    // ✅ Add to local detected hazards
-    setDetectedHazards(prev => [
-      {
-        id: Date.now(),
-        text: `${getHazardEmoji(hazardType)} ${description}`,
-        timestamp: new Date(),
-        type: 'detected',
         hazardType: hazardType,
-        photoUri: `file://${photo.path}`,
-        latitude: currentLocation.latitude,
-        longitude: currentLocation.longitude,
-      },
-      ...prev.slice(0, 4),
-    ]);
+        description: description,
+        timestamp: new Date().toISOString(),
+      };
 
-    // Vibrate and show success
-    Vibration.vibrate(200);
+      const wsSent = sendHazardAlert(hazardData);
 
-    if (wsSent) {
-      Alert.alert('✅ Success', 'Hazard alert sent to nearby drivers');
-    } else {
-      Alert.alert('⚠️ Partial Success', 'Photo saved, but alert may be delayed');
+      const photoBase64 = await RNFS.readFile(photo.path, 'base64');
+
+      const token = await AsyncStorage.getItem('jwt_token');
+
+      const response = await fetch(`${API_BASE_URL}/api/hazards/report`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`,
+        },
+        body: JSON.stringify({
+          latitude: currentLocation.latitude,
+          longitude: currentLocation.longitude,
+          hazardType,
+          description,
+          timestamp: hazardData.timestamp,
+          photo: `data:image/jpeg;base64,${photoBase64}`,
+        }),
+      });
+
+      setDetectedHazards(prev => [
+        {
+          id: Date.now(),
+          text: `${getHazardEmoji(hazardType)} ${description}`,
+          timestamp: new Date(),
+          type: 'detected',
+          hazardType: hazardType,
+          photoUri: `file://${photo.path}`,
+          latitude: currentLocation.latitude,
+          longitude: currentLocation.longitude,
+        },
+        ...prev.slice(0, 4),
+      ]);
+
+      Vibration.vibrate(200);
+
+      if (wsSent) {
+        Alert.alert('✅ Success', 'Hazard alert sent to nearby drivers');
+      } else {
+        Alert.alert('⚠️ Partial Success', 'Photo saved, but alert may be delayed');
+      }
+
+    } catch (error) {
+      console.error('❌ Error reporting hazard:', error);
+      Alert.alert('Error', 'Failed to report hazard: ' + error.message);
     }
-
-  } catch (error) {
-    console.error('❌ Error reporting hazard:', error);
-    Alert.alert('Error', 'Failed to report hazard: ' + error.message);
-  }
-};
-
+  };
 
   const getHazardEmoji = (hazardType) => {
     const emojiMap = {
@@ -421,6 +415,19 @@ useEffect(() => {
       'debris': '🪨',
     };
     return emojiMap[hazardType] || '⚠️';
+  };
+
+  const getMarkerColor = (hazardType) => {
+    const colorMap = {
+      'pothole': '#FF3B30',
+      'construction': '#FF9500',
+      'wet_road': '#007AFF',
+      'stopped_vehicle': '#FFCC00',
+      'animal': '#34C759',
+      'accident': '#FF2D55',
+      'debris': '#8E8E93',
+    };
+    return colorMap[hazardType] || '#FF3B30';
   };
 
   const onHazardDetectedByModel = (hazardType, description) => {
@@ -460,112 +467,110 @@ useEffect(() => {
     );
   }
 
-  const allAlerts = [...detectedHazards, ...receivedAlerts].sort(
-    (a, b) => b.timestamp - a.timestamp
-  ).slice(0, 5);
+  const allHazards = [...detectedHazards, ...receivedAlerts];
 
   return (
     <SafeAreaView style={styles.container}>
-      <StatusBar barStyle="light-content" backgroundColor="#000000" />
+      <StatusBar barStyle="dark-content" backgroundColor="#ffffff" />
       
-      <Camera
-        ref={camera}
-        style={StyleSheet.absoluteFill}
-        device={device}
-        isActive={isActive}
-        photo={true}
-        video={false}
-      />
+      {/* Background Camera - Hidden */}
+      <View style={styles.hiddenCamera}>
+        <Camera
+          ref={camera}
+          style={{ width: 1, height: 1 }}
+          device={device}
+          isActive={isActive}
+          photo={true}
+          video={false}
+        />
+      </View>
 
-      <View style={styles.overlay}>
-        <View style={styles.topBar}>
-          <View style={styles.statusBadge}>
-            <View style={styles.statusDotActive} />
-            <Text style={styles.statusText}>Monitoring</Text>
-          </View>
-          <View style={styles.rightBadges}>
-            {currentLocation && (
-              <View style={styles.locationBadge}>
-                <Text style={styles.locationText}>📍 GPS</Text>
-              </View>
-            )}
+      {/* Map View - Uses default provider (Apple Maps on iOS, OpenStreetMap on Android) */}
+      <MapView
+        ref={mapRef}
+        style={styles.map}
+        initialRegion={region}
+        showsUserLocation={true}
+        showsMyLocationButton={true}
+        followsUserLocation={true}
+        showsCompass={true}
+        showsTraffic={false}
+        mapType="standard"
+      >
+        {/* Current Location Circle */}
+        {currentLocation && (
+          <Circle
+            center={currentLocation}
+            radius={50}
+            fillColor="rgba(76, 175, 80, 0.2)"
+            strokeColor="rgba(76, 175, 80, 0.8)"
+            strokeWidth={2}
+          />
+        )}
+
+        {/* Hazard Markers */}
+        {allHazards.map((hazard) => (
+          <Marker
+            key={hazard.id}
+            coordinate={{
+              latitude: hazard.latitude,
+              longitude: hazard.longitude,
+            }}
+            title={hazard.text}
+            description={`${hazard.timestamp.toLocaleTimeString()}${hazard.distance ? ` - ${Math.round(hazard.distance)}m away` : ''}`}
+            pinColor={getMarkerColor(hazard.hazardType)}
+            onPress={() => openAlertDetail(hazard)}
+          >
             <View style={[
-              styles.wsBadge,
-              wsConnected ? styles.wsConnected : styles.wsDisconnected
+              styles.markerContainer,
+              hazard.type === 'detected' ? styles.markerDetected : styles.markerReceived
             ]}>
-              <View style={[
-                styles.wsDot,
-                wsConnected ? styles.wsDotConnected : styles.wsDotDisconnected
-              ]} />
-              <Text style={styles.wsText}>
-                {wsConnected ? 'Live' : 'Offline'}
-              </Text>
+              <Text style={styles.markerEmoji}>{getHazardEmoji(hazard.hazardType)}</Text>
             </View>
+          </Marker>
+        ))}
+      </MapView>
+
+      {/* Top Status Bar */}
+      <View style={styles.topBar}>
+        <View style={styles.statusBadge}>
+          <View style={styles.statusDotActive} />
+          <Text style={styles.statusText}>AI Monitoring</Text>
+        </View>
+        <View style={styles.rightBadges}>
+          {currentLocation && (
+            <View style={styles.locationBadge}>
+              <Text style={styles.locationText}>📍 GPS</Text>
+            </View>
+          )}
+          <View style={[
+            styles.wsBadge,
+            wsConnected ? styles.wsConnected : styles.wsDisconnected
+          ]}>
+            <View style={[
+              styles.wsDot,
+              wsConnected ? styles.wsDotConnected : styles.wsDotDisconnected
+            ]} />
+            <Text style={styles.wsText}>
+              {wsConnected ? 'Live' : 'Offline'}
+            </Text>
           </View>
         </View>
+      </View>
 
-        <View style={styles.alertsContainer}>
-          <Text style={styles.alertsTitle}>Recent Alerts</Text>
-          <ScrollView 
-            style={styles.alertsList}
-            showsVerticalScrollIndicator={false}
-          >
-            {allAlerts.map((alert) => (
-              <TouchableOpacity
-                key={alert.id}
-                onPress={() => openAlertDetail(alert)}
-                activeOpacity={0.8}
-              >
-                <View 
-                  style={[
-                    styles.alertItem,
-                    alert.type === 'detected' ? styles.alertDetected : styles.alertReceived
-                  ]}
-                >
-                  <View style={styles.alertContent}>
-                    {alert.photoUri && (
-                      <Image
-                        source={{ uri: alert.photoUri }}
-                        style={styles.alertThumbnail}
-                        resizeMode="cover"
-                      />
-                    )}
-                    <View style={styles.alertTextContainer}>
-                      <View style={styles.alertHeader}>
-                        <Text style={styles.alertText}>{alert.text}</Text>
-                        {alert.type === 'received' && alert.distance && (
-                          <Text style={styles.distanceText}>
-                            {Math.round(alert.distance)}m
-                          </Text>
-                        )}
-                      </View>
-                      <Text style={styles.alertTime}>
-                        {alert.timestamp.toLocaleTimeString()}
-                      </Text>
-                      {alert.type === 'received' && (
-                        <Text style={styles.alertSource}>From nearby driver</Text>
-                      )}
-                    </View>
-                  </View>
-                </View>
-              </TouchableOpacity>
-            ))}
-            {allAlerts.length === 0 && (
-              <Text style={styles.noAlertsText}>
-                No alerts yet. Monitoring road conditions...
-              </Text>
-            )}
-          </ScrollView>
+      {/* Bottom Stats Bar */}
+      <View style={styles.bottomStats}>
+        <View style={styles.statCard}>
+          <Text style={styles.statNumber}>{detectedHazards.length}</Text>
+          <Text style={styles.statLabel}>Detected</Text>
         </View>
-
-        <View style={styles.bottomBar}>
-          <TouchableOpacity
-            style={styles.manualReportButton}
-            onPress={async () => await reportHazard('pothole', 'Pothole detected')}
-            activeOpacity={0.8}
-          >
-            {/* <Text style={styles.manualReportText}>🚨 Manual Report</Text> */}
-          </TouchableOpacity>
+        <View style={styles.statCard}>
+          <Text style={styles.statNumber}>{receivedAlerts.length}</Text>
+          <Text style={styles.statLabel}>Received</Text>
+        </View>
+        <View style={styles.statCard}>
+          <Text style={styles.statNumber}>{allHazards.length}</Text>
+          <Text style={styles.statLabel}>Total Alerts</Text>
         </View>
       </View>
 
@@ -644,17 +649,26 @@ useEffect(() => {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#000000',
+    backgroundColor: '#ffffff',
+  },
+  hiddenCamera: {
+    position: 'absolute',
+    width: 1,
+    height: 1,
+    opacity: 0,
+  },
+  map: {
+    flex: 1,
   },
   permissionContainer: {
     flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
     padding: 20,
-    backgroundColor: '#0a0a0a',
+    backgroundColor: '#f5f5f5',
   },
   permissionText: {
-    color: '#ffffff',
+    color: '#333',
     fontSize: 18,
     textAlign: 'center',
     marginBottom: 20,
@@ -670,12 +684,11 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: 'bold',
   },
-  overlay: {
-    flex: 1,
-    justifyContent: 'space-between',
-  },
   topBar: {
-    padding: 20,
+    position: 'absolute',
+    top: 10,
+    left: 20,
+    right: 20,
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'flex-start',
@@ -686,17 +699,22 @@ const styles = StyleSheet.create({
   statusBadge: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: 'rgba(76, 175, 80, 0.3)',
+    backgroundColor: 'rgba(76, 175, 80, 0.95)',
     paddingHorizontal: 15,
     paddingVertical: 10,
     borderRadius: 20,
     gap: 8,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.25,
+    shadowRadius: 3.84,
+    elevation: 5,
   },
   statusDotActive: {
     width: 10,
     height: 10,
     borderRadius: 5,
-    backgroundColor: '#4CAF50',
+    backgroundColor: '#ffffff',
   },
   statusText: {
     color: '#ffffff',
@@ -704,13 +722,18 @@ const styles = StyleSheet.create({
     fontWeight: '600',
   },
   locationBadge: {
-    backgroundColor: 'rgba(0, 0, 0, 0.7)',
+    backgroundColor: 'rgba(255, 255, 255, 0.95)',
     paddingHorizontal: 15,
     paddingVertical: 10,
     borderRadius: 20,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.25,
+    shadowRadius: 3.84,
+    elevation: 5,
   },
   locationText: {
-    color: '#ffffff',
+    color: '#333',
     fontSize: 14,
     fontWeight: '600',
   },
@@ -721,12 +744,17 @@ const styles = StyleSheet.create({
     paddingVertical: 10,
     borderRadius: 20,
     gap: 8,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.25,
+    shadowRadius: 3.84,
+    elevation: 5,
   },
   wsConnected: {
-    backgroundColor: 'rgba(76, 175, 80, 0.3)',
+    backgroundColor: 'rgba(76, 175, 80, 0.95)',
   },
   wsDisconnected: {
-    backgroundColor: 'rgba(255, 59, 48, 0.3)',
+    backgroundColor: 'rgba(255, 59, 48, 0.95)',
   },
   wsDot: {
     width: 8,
@@ -734,114 +762,67 @@ const styles = StyleSheet.create({
     borderRadius: 4,
   },
   wsDotConnected: {
-    backgroundColor: '#4CAF50',
+    backgroundColor: '#ffffff',
   },
   wsDotDisconnected: {
-    backgroundColor: '#ff3b30',
+    backgroundColor: '#ffffff',
   },
   wsText: {
     color: '#ffffff',
     fontSize: 12,
     fontWeight: '600',
   },
-  alertsContainer: {
-    flex: 1,
-    justifyContent: 'flex-end',
-    paddingHorizontal: 20,
-    paddingBottom: 20,
-    maxHeight: 300,
-  },
-  alertsTitle: {
-    color: '#ffffff',
-    fontSize: 18,
-    fontWeight: 'bold',
-    marginBottom: 10,
-    textShadowColor: 'rgba(0, 0, 0, 0.75)',
-    textShadowOffset: { width: -1, height: 1 },
-    textShadowRadius: 10,
-  },
-  alertsList: {
-    flex: 1,
-  },
-  alertItem: {
-    padding: 12,
-    borderRadius: 10,
-    marginBottom: 10,
-  },
-  alertDetected: {
-    backgroundColor: 'rgba(255, 59, 48, 0.9)',
-  },
-  alertReceived: {
-    backgroundColor: 'rgba(255, 152, 0, 0.9)',
-  },
-  alertContent: {
-    flexDirection: 'row',
-    gap: 12,
-  },
-  alertThumbnail: {
-    width: 60,
-    height: 60,
-    borderRadius: 8,
-    backgroundColor: 'rgba(0, 0, 0, 0.3)',
-  },
-  alertTextContainer: {
-    flex: 1,
-  },
-  alertHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
+  markerContainer: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    justifyContent: 'center',
     alignItems: 'center',
-    marginBottom: 5,
+    borderWidth: 3,
+    borderColor: '#ffffff',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.3,
+    shadowRadius: 3,
+    elevation: 5,
   },
-  alertText: {
-    color: '#ffffff',
-    fontSize: 16,
+  markerDetected: {
+    backgroundColor: '#FF3B30',
+  },
+  markerReceived: {
+    backgroundColor: '#FF9500',
+  },
+  markerEmoji: {
+    fontSize: 20,
+  },
+  bottomStats: {
+    position: 'absolute',
+    bottom: 20,
+    left: 20,
+    right: 20,
+    flexDirection: 'row',
+    justifyContent: 'space-around',
+    backgroundColor: 'rgba(255, 255, 255, 0.95)',
+    borderRadius: 15,
+    padding: 15,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.25,
+    shadowRadius: 3.84,
+    elevation: 5,
+  },
+  statCard: {
+    alignItems: 'center',
+  },
+  statNumber: {
+    fontSize: 24,
     fontWeight: 'bold',
-    flex: 1,
+    color: '#333',
   },
-  distanceText: {
-    color: '#ffffff',
-    fontSize: 14,
-    fontWeight: '600',
-    marginLeft: 10,
-  },
-  alertTime: {
-    color: '#ffffff',
+  statLabel: {
     fontSize: 12,
-    opacity: 0.8,
-  },
-  alertSource: {
-    color: '#ffffff',
-    fontSize: 11,
-    opacity: 0.7,
-    fontStyle: 'italic',
-    marginTop: 2,
-  },
-  noAlertsText: {
-    color: '#ffffff',
-    fontSize: 16,
-    textAlign: 'center',
-    opacity: 0.6,
-  },
-  bottomBar: {
-    padding: 20,
-    alignItems: 'center',
-  },
-  manualReportButton: {
-  backgroundColor: 'transparent',
-  paddingVertical: 15,
-  paddingHorizontal: 30,
-  borderRadius: 25,
-  elevation: 5,
-  // shadowColor: '#ff3b30',
-  // shadowOffset: { width: 0, height: 4 },
-  // shadowOpacity: 0.3,
-  // shadowRadius: 8,
-},
-  manualReportText: {
-    color: '#ffffff',
-    fontSize: 16,
-    fontWeight: 'bold',
+    color: '#666',
+    marginTop: 5,
   },
   modalContainer: {
     flex: 1,
@@ -852,7 +833,7 @@ const styles = StyleSheet.create({
   modalContent: {
     width: '90%',
     maxHeight: '80%',
-    backgroundColor: '#1a1a1a',
+    backgroundColor: '#ffffff',
     borderRadius: 20,
     padding: 20,
   },
@@ -861,12 +842,12 @@ const styles = StyleSheet.create({
     padding: 10,
   },
   closeButtonText: {
-    color: '#ffffff',
+    color: '#333',
     fontSize: 24,
     fontWeight: 'bold',
   },
   modalTitle: {
-    color: '#ffffff',
+    color: '#333',
     fontSize: 24,
     fontWeight: 'bold',
     marginBottom: 20,
@@ -877,7 +858,7 @@ const styles = StyleSheet.create({
     height: 300,
     borderRadius: 10,
     marginBottom: 20,
-    backgroundColor: '#000',
+    backgroundColor: '#f0f0f0',
   },
   modalDetails: {
     gap: 15,
@@ -887,15 +868,15 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     paddingVertical: 10,
     borderBottomWidth: 1,
-    borderBottomColor: 'rgba(255, 255, 255, 0.1)',
+    borderBottomColor: 'rgba(0, 0, 0, 0.1)',
   },
   detailLabel: {
-    color: '#999',
+    color: '#666',
     fontSize: 16,
     fontWeight: '600',
   },
   detailValue: {
-    color: '#ffffff',
+    color: '#333',
     fontSize: 16,
     flex: 1,
     textAlign: 'right',
