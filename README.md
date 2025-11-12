@@ -1,220 +1,178 @@
-# 🚗 RoadSafe AI — Intelligent Road Hazard Detection & Real-Time Alert System
+# 🚗 RoadSafe – Real-Time Road Hazard Detection System
 
-> **Team:** GG_Coders    
-> **Problem Statement:** Road Hazard Detection & Real-Time Alerts
-
----
-
-## 🌍 Overview
-
-RoadSafe AI transforms **any smartphone into a proactive, real-time road hazard detection device**, creating an **intelligent, crowd-sourced safety network**.  
-By fusing **AI-based visual detection** with **physical sensor data (IMU)**, we verify hazards instantly and alert nearby drivers — enhancing road safety across India.
+> **AI-powered road safety platform** that detects, reports, and alerts nearby users about road hazards in real time using **FastAPI**, **MongoDB**, and **React Native**.
 
 ---
 
-## 💡 The Next-Generation Approach
+## Overview
 
-### 1️⃣ Fuse Data Streams with Transformer AI
-- Runs **RT-DETR (Real-Time Detection Transformer)** on the live camera feed.
-- Monitors the **Inertial Measurement Unit (IMU)** — accelerometer and gyroscope.
-- Uses **attention mechanisms** for superior contextual understanding of road scenes.
-
-### 2️⃣ Generate Dynamic Confidence Score (Sensor Fusion)
-- Vision-only detection → low confidence.
-- Vision + IMU impact → instant **high-confidence hazard**.
-- Enables verification **from a single user** device.
-
-### 3️⃣ Privacy-First Edge Processing
-- All processing and blurring (faces, license plates) happens **on-device**.
-- Transmits only **anonymized, geotagged** event packets to the cloud.
-
-### 4️⃣ Instant Verified Alerts
-- Cloud backend aggregates verified events.
-- Sends **push notifications (FCM)** to users on nearby routes via **FastAPI backend**.
+**RoadSafe AI** transforms **any smartphone into a proactive, real-time road hazard detection device**, creating an **intelligent, crowd-sourced safety network**.
+It fuses **AI-based visual detection** verified by user input, alerting nearby drivers and enhancing road safety across India.
 
 ---
 
-## 🧠 System Architecture (Mermaid Diagram)
+## 🧠 Models Used
 
-```mermaid
-flowchart TD
-    A[Smartphone Camera + IMU Sensors] --> B[On-Device AI (RT-DETR + IMU Fusion)]
-    B --> C[Real-Time Blurring (Mediapipe + OpenCV)]
-    C --> D[Geo-Tagged Event Packet]
-    D --> E[FastAPI Backend]
-    E --> F[MongoDB Atlas (Geo Queries)]
-    E --> G[Hazard Confidence Scoring Engine]
-    G --> H[Firebase Cloud Messaging (FCM)]
-    H --> I[Driver's Mobile App — Live Alert]
+| Model                                         | Description                                                                                   | Framework                        |
+| --------------------------------------------- | --------------------------------------------------------------------------------------------- | -------------------------------- |
+| **RT-DETR (Real-Time Detection Transformer)** | Transformer-based object detection model for real-time hazard recognition on live camera feed | TensorFlow Lite / PyTorch Mobile |
+| **MobileNet Transformer (optimized variant)** | Lightweight transformer backbone for mobile inference                                         | TensorFlow Lite                  |
+| **Mediapipe (optional)**                      | Used for real-time blurring of faces and license plates                                       | On-device preprocessing          |
+
+> ✅ The combination of **RT-DETR** and **MobileNet Transformer** enables highly accurate, real-time detection while preserving privacy through **on-device AI**.
+
+---
+
+## Features
+
+### 📱 Mobile App (React Native)
+
+* **AI-powered hazard detection** using TensorFlow Lite (RT-DETR).
+* **Live map view** showing detected and received hazards.
+* **Automatic photo capture** and base64 upload.
+* **WebSocket communication** for real-time alerts.
+* **Vibration + animated alerts** for nearby hazards.
+* **Camera preview overlay** for visual feedback.
+
+### ⚙️ Backend (FastAPI)
+
+* **JWT Authentication** (`/auth/signup`, `/auth/login`)
+* **Hazard Reporting API** (`/api/hazards/report`)
+* **WebSocket endpoint** (`/ws`) for real-time updates
+* **Duplicate hazard detection** (50m, 2-min rule)
+* **Automatic merging of similar reports**
+* **Static image serving** via `/uploads/`
+* **MongoDB geospatial indexing** for proximity queries
+
+---
+
+## 🧩 Tech Stack
+
+| Layer                  | Technology                                                    | Purpose                               |
+| ---------------------- | ------------------------------------------------------------- | ------------------------------------- |
+| **Frontend**           | React Native, VisionCamera, React Native Maps                 | Cross-platform mobile UI              |
+| **AI Models**          | RT-DETR (Transformer), MobileNet Transformer, TensorFlow Lite | On-device hazard detection            |
+| **Backend**            | FastAPI, Motor (Async MongoDB), WebSockets                    | Event processing & notifications      |
+| **Database**           | MongoDB Atlas                                                 | Geo-spatial hazard storage            |
+| **Hosting**            | Render / Google Cloud Run                                     | Scalable deployment                   |
+| **Auth**               | JWT Tokens                                                    | Secure login and signup               |
+
+---
+
+## ⚙️ Backend Setup (FastAPI)
+
+```bash
+cd backend
+python3 -m venv venv
+source venv/bin/activate
+pip install -r requirements.txt
+```
+
+### Environment Variables
+
+`.env`
+
+```
+MONGODB_URL=mongodb+srv://<username>:<password>@cluster.mongodb.net/
+SECRET_KEY=your_secret_key
+```
+
+### Run Locally
+
+```bash
+uvicorn main:app --reload --host 0.0.0.0 --port 8000
 ```
 
 ---
 
-## 🧩 Use-Case Diagram (Mermaid)
+## 📡 API Endpoints
 
-```mermaid
-usecaseDiagram
-    actor Driver
-    actor CloudBackend as "Cloud Backend"
-    actor Other Drivers
-    Driver --> (Detect Hazard)
-    Driver --> (Receive Alert)
-    (Detect Hazard) --> (Sensor Fusion AI)
-    (Sensor Fusion AI) --> CloudBackend
-    CloudBackend --> (Aggregate Verified Hazards)
-    Other Drivers--> (View Hazard Reports)
-    CloudBackend --> (Send Push Notification)
+| Method | Endpoint              | Description                |
+| ------ | --------------------- | -------------------------- |
+| `POST` | `/auth/signup`        | Register new user          |
+| `POST` | `/auth/login`         | Login user (JWT)           |
+| `POST` | `/api/hazards/report` | Report hazard with image   |
+| `GET`  | `/api/stats`          | Get hazard and user stats  |
+| `WS`   | `/ws`                 | WebSocket for live updates |
+
+---
+
+## 📱 Mobile App Setup (React Native)
+
+```bash
+cd app
+npm install
+```
+
+Edit backend URLs in:
+
+* `CameraScreen.jsx`
+* `AuthScreen.jsx`
+
+```js
+const API_BASE_URL = 'https://<your-backend>.onrender.com';
+const WS_URL = 'wss://<your-backend>.onrender.com/ws';
+```
+
+Add model in:
+
+```
+app/assets/models/model.tflite
+```
+
+Run the development server:
+
+```bash
+npx react-native start
+```
+
+Run the app on Android:
+
+```bash
+npx react-native run-android
 ```
 
 ---
 
-## ⚙️ Technologies Used
+## 🧠 AI Model Integration Example
 
-| Layer | Technology | Purpose |
-|-------|-------------|----------|
-| **Frontend (Mobile)** | React Native | Cross-platform app |
-| **On-Device AI** | TensorFlow Lite / PyTorch Mobile | Run RT-DETR locally |
-| **Model** |MobileNet Transformer | RT-DETR Transformer | Real-time contextual detection |
-| **Sensor Fusion** | Android SensorManager | IMU access |
-| **Mapping & Location** | Google Maps API | Geo-coordinates, routing |
-| **Backend** | FastAPI (Python) | High-performance event processing |
-| **Database** | MongoDB Atlas for MVP | Geo-spatial databases for scalable applications|
-| **Push Notifications** |Real-time alerts with websockets|
+```js
+const modelHook = useTensorflowModel(require('../../assets/models/model.tflite'));
+const model = modelHook.state === 'loaded' ? modelHook.model : null;
 
----
-
-## 🧬 Process Flow
-
-```mermaid
-sequenceDiagram
-    participant User as Driver
-    participant App as Mobile App (Edge AI)
-    participant Backend as FastAPI Backend
-    participant DB as MongoDB Atlas
-    participant FCM as Firebase Cloud Messaging
-
-    User->>App: Open App & Start Detection
-    App->>App: RT-DETR detects hazard
-    App->>App: IMU senses impact (fusion)
-    App->>Backend: Send anonymized event packet (Geo + Confidence)
-    Backend->>DB: Store & update hazard confidence
-    Backend->>FCM: Send push notification to nearby users
-    FCM-->>User: Hazard Alert Popup
+// Run inference
+const outputs = model.runSync([inputTensor]);
 ```
 
----
-
-## 🔄 Sensor Fusion Details
-
-```mermaid
-flowchart TD
-    A[Accelerometer] --> D[IMU Data]
-    B[Gyroscope] --> D
-    C[Camera Feed (RT-DETR)] --> E[Hazard Detector]
-    D --> F[Sensor Fusion Engine]
-    E --> F
-    F --> G[Dynamic Hazard Confidence Score]
-    G --> H[Upload Anonymized Event]
-```
-
-> The **Sensor Fusion Engine** correlates visual detections with IMU motion data in real time.  
-> Verified bumps, tilts, or jerks are combined with AI predictions to create a **Dynamic Hazard Confidence Score** — ensuring that only high-confidence, verified hazards are reported to the network.
+The preprocessing pipeline ensures that images are resized to **224x224**, normalized between **[-1, 1]**, and converted into a tensor suitable for the model inference.
 
 ---
 
-## Key Features
+## 🗺️ Map Screen Highlights
 
-### Core Safety
-- Real-Time Hazard Detection (AI vision)
-- Instant Verified Alerts (via FCM)
-- Privacy-First Edge Design (no sensitive data leaves device)
-
-### Technical
-- **On-Device Sensor Fusion** (Vision + IMU)
-- **Edge AI** for low latency
-- **Automatic GeoTagging**
-- **Dynamic Hazard Scoring** (Self-learning backend)
-
-### Cloud Features
-- Hazard aggregation and verification logic
-- Real-time geofenced notifications
-- Dashboard-ready MongoDB backend for municipal reporting
+✅ Real-time GPS tracking
+✅ AI-driven hazard detection
+✅ Color-coded hazard markers
+✅ Vibration & animated alerts
+✅ Modal with photo and details
 
 ---
 
-## 🏗️ Architecture Overview
+## 🧠 Future Enhancements
 
-| Component | Description |
-|------------|--------------|
-| **Edge Device** | Runs RT-DETR, sends verified packets |
-| **FastAPI Backend** | Receives, validates, and scores events |
-| **MongoDB Atlas** | Stores hazard data with GPS coordinates |
-| **FCM** | Pushes alerts to relevant users |
-| **Dashboard (Future)** | Allows municipalities to view live hazard map |
-
----
-
-## Potential Impact
-
-- Prevents accidents via proactive alerts  
-- Aids city infrastructure planning with data-driven maintenance  
-- Reduces congestion and secondary collisions  
-- Builds India’s first live **Road Safety Network**
+* [x] **Firebase push notifications** for real-time alerts to nearby users.
+* [x] **AWS S3 / Cloudinary integration** for scalable image storage.
+* [x] **User reputation scoring system** to prioritize credible reports.
+* [x] **Municipal dashboard with live heatmaps** for authorities.
+* [x] **Enhanced Transformer optimization** for faster inference on edge devices.
+* [x] **Offline hazard caching and sync** for low-connectivity regions.
+* [x] **Multi-language support** for inclusivity across India.
+* [x] **Integration with Google Maps Directions API** to reroute around hazards.
+* [x] **Automatic model updates** through version-controlled OTA downloads.
 
 ---
 
-## Estimated Implementation Cost
+## 🛡️ License
 
-| Component | Estimated Cost | Notes |
-|------------|----------------|-------|
-| Cloud Backend | AWS EC2 / Google Cloud Run | Scalable, minimal |
-| Database | MongoDB Atlas | Free tier sufficient |
-| Mapping API | Google Maps API / Mapbox | Usage-based |
-| Push Notifications | Firebase Cloud Messaging | Free |
-| Model Training | Colab Pro / AWS SageMaker | One-time cost |
-
----
-
-## Our Vision
-
-> “To build a truly intelligent, privacy-preserving road safety network that proactively prevents accidents, transforming passive journey data into active, life-saving intelligence.”
-
----
-
-## 📺 Demo Resources
-
-- **APK Download:** [Coming Soon](#)
-- **Demo Video:** [YouTube Link](#)
-- **Figma Wireframes:** [View on Figma](https://www.figma.com/design/45ZP4wfx65KC9FpFcEBRRV/Untitled)
-- **Backend API:** [To be deployed on Render/Vercel](#)
-
----
-
-## 🏁 Future Scope
-- Integration with **Municipal Dashboards** for automated road repair prioritization.
-- **Multi-Sensor Fusion** with external IoT sensors (car OBD / dashcams).
-- Deploying a **national crowd-sourced road safety map**.
-
----
-
-## 🛠️ Repository Structure (Example)
-
-```
-RoadSafeAI/
-├── android/
-│   ├── app/
-│   └── build.gradle
-├── model/
-│   └── hazard_detector.tflite
-├── backend/
-│   ├── main.py
-│   ├── requirements.txt
-│   └── utils/
-├── assets/
-│   └── demo_videos/
-└── README.md
-```
----
-
-> 📩 **For Judges and Reviewers:**  
-> You can experience the live demo directly through our hosted Appetize.io link or download the APK from our release page.
+This project is licensed under the **MIT License**.
+Feel free to use, modify, and build upon it!

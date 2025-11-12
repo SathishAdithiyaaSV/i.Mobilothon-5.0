@@ -138,6 +138,7 @@ export default function MapScreen({ navigation }) {
 
   useEffect(() => {
     if (!model || !camera.current) return;
+    console.log(model)
 
     const interval = setInterval(async () => {
       try {
@@ -150,13 +151,14 @@ export default function MapScreen({ navigation }) {
         console.log("Captured");
 
         const inputTensor = await preprocessImage(photo.path, 'uint8');
-        const outputs = model.runSync([inputTensor]);
+        console.log('Tensor length:', inputTensor.length);
+        const outputs = await model.runSync([inputTensor]);
 
-        console.log(outputs);
+        console.log(outputs[0][0]);
 
-        const mockOutput = 0.8;
+        const mockOutput = 0.6;
 
-        if (mockOutput > 0.7) {
+        if (2 > 0) {
           const hazardType = 'pothole';
           const now = Date.now();
           const cooldownMs = 20000;
