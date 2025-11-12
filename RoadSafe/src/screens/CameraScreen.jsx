@@ -5,14 +5,13 @@ import {
   Text,
   TouchableOpacity,
   StyleSheet,
-  Alert,
   StatusBar,
   SafeAreaView,
   Vibration,
   Image,
   Modal,
   ScrollView,
-  Dimensions,
+  Animated,
 } from 'react-native';
 import MapView, { Marker, Circle } from 'react-native-maps';
 import { Camera, useCameraDevices } from 'react-native-vision-camera';
@@ -21,12 +20,12 @@ import RNFS from 'react-native-fs';
 import { useTensorflowModel } from 'react-native-fast-tflite';
 import { preprocessImage } from '../utils/preprocessImage.js';
 
-const API_BASE_URL = 'https://58db7ef748f9.ngrok-free.app';
-const WS_URL = 'wss://58db7ef748f9.ngrok-free.app/ws';
+const API_BASE_URL = 'https://2811788f6e67.ngrok-free.app';
+const WS_URL = 'wss://2811788f6e67.ngrok-free.app/ws';
 
 // Utility: compute distance (in meters) between two coordinates
 function getDistance(lat1, lon1, lat2, lon2) {
-  const R = 6371e3; // Earth radius in meters
+  const R = 6371e3;
   const toRad = (deg) => deg * (Math.PI / 180);
   const dLat = toRad(lat2 - lat1);
   const dLon = toRad(lon2 - lon1);
@@ -46,6 +45,8 @@ export default function MapScreen({ navigation }) {
   const [wsConnected, setWsConnected] = useState(false);
   const [selectedAlert, setSelectedAlert] = useState(null);
   const [modalVisible, setModalVisible] = useState(false);
+  const [toastMessage, setToastMessage] = useState(null);
+  const [incomingAlert, setIncomingAlert] = useState(null);
   const [region, setRegion] = useState({
     latitude: 12.9716,
     longitude: 77.5946,
@@ -58,11 +59,55 @@ export default function MapScreen({ navigation }) {
   const ws = useRef(null);
   const lastDetectedHazards = useRef({});
   const reconnectTimeout = useRef(null);
+  const toastOpacity = useRef(new Animated.Value(0)).current;
+  const alertOpacity = useRef(new Animated.Value(0)).current;
   const devices = useCameraDevices();
   const device = devices[0];
 
   const modelHook = useTensorflowModel(require('../../assets/models/model.tflite'));
   const model = modelHook.state === 'loaded' ? modelHook.model : null;
+
+  // Auto-dismiss toast after 3 seconds
+  useEffect(() => {
+    if (toastMessage) {
+      Animated.sequence([
+        Animated.timing(toastOpacity, {
+          toValue: 1,
+          duration: 300,
+          useNativeDriver: true,
+        }),
+        Animated.delay(2400),
+        Animated.timing(toastOpacity, {
+          toValue: 0,
+          duration: 300,
+          useNativeDriver: true,
+        }),
+      ]).start(() => {
+        setToastMessage(null);
+      });
+    }
+  }, [toastMessage]);
+
+  // Auto-dismiss incoming alert after 3 seconds
+  useEffect(() => {
+    if (incomingAlert) {
+      Animated.sequence([
+        Animated.timing(alertOpacity, {
+          toValue: 1,
+          duration: 300,
+          useNativeDriver: true,
+        }),
+        Animated.delay(2400),
+        Animated.timing(alertOpacity, {
+          toValue: 0,
+          duration: 300,
+          useNativeDriver: true,
+        }),
+      ]).start(() => {
+        setIncomingAlert(null);
+      });
+    }
+  }, [incomingAlert]);
 
   useEffect(() => {
     console.log(devices);
@@ -96,7 +141,7 @@ export default function MapScreen({ navigation }) {
 
     const interval = setInterval(async () => {
       try {
-        if (!currentLocation) return; // skip if GPS not yet available
+        if (!currentLocation) return;
 
         console.log("Capturing...");
         const photo = await camera.current.takePhoto({
@@ -109,15 +154,14 @@ export default function MapScreen({ navigation }) {
 
         console.log(outputs);
 
-        const mockOutput = 0.8; // replace with real model output later
+        const mockOutput = 0.8;
 
         if (mockOutput > 0.7) {
           const hazardType = 'pothole';
           const now = Date.now();
-          const cooldownMs = 20000; // 20 seconds
+          const cooldownMs = 20000;
           const last = lastDetectedHazards.current[hazardType];
 
-          // Prevent duplicate detection based on time + distance
           if (
             last &&
             now - last.timestamp < cooldownMs &&
@@ -126,13 +170,12 @@ export default function MapScreen({ navigation }) {
               last.longitude,
               currentLocation.latitude,
               currentLocation.longitude
-            ) < 30 // within 30 meters
+            ) < 30
           ) {
             console.log(`⏸️ Skipping duplicate ${hazardType} detection`);
             return;
           }
 
-          // Save last detection
           lastDetectedHazards.current[hazardType] = {
             timestamp: now,
             latitude: currentLocation.latitude,
@@ -253,6 +296,7 @@ export default function MapScreen({ navigation }) {
       };
 
       setReceivedAlerts(prev => [newAlert, ...prev.slice(0, 9)]);
+      setIncomingAlert(newAlert);
 
       Vibration.vibrate([0, 200, 100, 200]);
     }
@@ -393,14 +437,14 @@ export default function MapScreen({ navigation }) {
       Vibration.vibrate(200);
 
       if (wsSent) {
-        Alert.alert('✅ Success', 'Hazard alert sent to nearby drivers');
+        setToastMessage({ type: 'success', text: '✅ Hazard alert sent to nearby drivers' });
       } else {
-        Alert.alert('⚠️ Partial Success', 'Photo saved, but alert may be delayed');
+        setToastMessage({ type: 'warning', text: '⚠️ Photo saved, alert may be delayed' });
       }
 
     } catch (error) {
       console.error('❌ Error reporting hazard:', error);
-      Alert.alert('Error', 'Failed to report hazard: ' + error.message);
+      setToastMessage({ type: 'error', text: '❌ Failed to report hazard' });
     }
   };
 
@@ -473,19 +517,22 @@ export default function MapScreen({ navigation }) {
     <SafeAreaView style={styles.container}>
       <StatusBar barStyle="dark-content" backgroundColor="#ffffff" />
       
-      {/* Background Camera - Hidden */}
-      <View style={styles.hiddenCamera}>
+      {/* Corner Camera Preview */}
+      <View style={styles.cornerCamera}>
         <Camera
           ref={camera}
-          style={{ width: 1, height: 1 }}
+          style={styles.cameraPreview}
           device={device}
           isActive={isActive}
           photo={true}
           video={false}
         />
+        <View style={styles.cameraLabel}>
+          <Text style={styles.cameraLabelText}>AI Vision</Text>
+        </View>
       </View>
 
-      {/* Map View - Uses default provider (Apple Maps on iOS, OpenStreetMap on Android) */}
+      {/* Map View */}
       <MapView
         ref={mapRef}
         style={styles.map}
@@ -497,7 +544,6 @@ export default function MapScreen({ navigation }) {
         showsTraffic={false}
         mapType="standard"
       >
-        {/* Current Location Circle */}
         {currentLocation && (
           <Circle
             center={currentLocation}
@@ -508,7 +554,6 @@ export default function MapScreen({ navigation }) {
           />
         )}
 
-        {/* Hazard Markers */}
         {allHazards.map((hazard) => (
           <Marker
             key={hazard.id}
@@ -557,6 +602,38 @@ export default function MapScreen({ navigation }) {
           </View>
         </View>
       </View>
+
+      {/* Toast Notification */}
+      {toastMessage && (
+        <Animated.View 
+          style={[
+            styles.toastContainer,
+            { opacity: toastOpacity },
+            toastMessage.type === 'success' && styles.toastSuccess,
+            toastMessage.type === 'warning' && styles.toastWarning,
+            toastMessage.type === 'error' && styles.toastError,
+          ]}
+        >
+          <Text style={styles.toastText}>{toastMessage.text}</Text>
+        </Animated.View>
+      )}
+
+      {/* Incoming Alert Popup */}
+      {incomingAlert && (
+        <Animated.View 
+          style={[styles.incomingAlertContainer, { opacity: alertOpacity }]}
+        >
+          <View style={styles.incomingAlertContent}>
+            <Text style={styles.incomingAlertTitle}>⚠️ Hazard Ahead!</Text>
+            <Text style={styles.incomingAlertText}>{incomingAlert.text}</Text>
+            {incomingAlert.distance && (
+              <Text style={styles.incomingAlertDistance}>
+                {Math.round(incomingAlert.distance)}m away
+              </Text>
+            )}
+          </View>
+        </Animated.View>
+      )}
 
       {/* Bottom Stats Bar */}
       <View style={styles.bottomStats}>
@@ -651,15 +728,47 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: '#ffffff',
   },
-  hiddenCamera: {
+
+  /** CAMERA PREVIEW (Bottom-right corner) **/
+  cornerCamera: {
     position: 'absolute',
-    width: 1,
-    height: 1,
-    opacity: 0,
+    bottom: 100,
+    right: 20,
+    width: 120,
+    height: 160,
+    borderRadius: 15,
+    overflow: 'hidden',
+    zIndex: 10,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.3,
+    shadowRadius: 5,
+    elevation: 8,
   },
+  cameraPreview: {
+    width: '100%',
+    height: '100%',
+  },
+  cameraLabel: {
+    position: 'absolute',
+    bottom: 0,
+    left: 0,
+    right: 0,
+    backgroundColor: 'rgba(0, 0, 0, 0.7)',
+    paddingVertical: 4,
+    alignItems: 'center',
+  },
+  cameraLabelText: {
+    color: '#ffffff',
+    fontSize: 10,
+    fontWeight: '600',
+  },
+
   map: {
     flex: 1,
   },
+
+  /** PERMISSION SCREEN **/
   permissionContainer: {
     flex: 1,
     justifyContent: 'center',
@@ -684,6 +793,8 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: 'bold',
   },
+
+  /** TOP STATUS BAR **/
   topBar: {
     position: 'absolute',
     top: 10,
@@ -772,6 +883,8 @@ const styles = StyleSheet.create({
     fontSize: 12,
     fontWeight: '600',
   },
+
+  /** MARKERS **/
   markerContainer: {
     width: 40,
     height: 40,
@@ -795,6 +908,8 @@ const styles = StyleSheet.create({
   markerEmoji: {
     fontSize: 20,
   },
+
+  /** BOTTOM STATS BAR **/
   bottomStats: {
     position: 'absolute',
     bottom: 20,
@@ -824,6 +939,8 @@ const styles = StyleSheet.create({
     color: '#666',
     marginTop: 5,
   },
+
+  /** MODAL **/
   modalContainer: {
     flex: 1,
     justifyContent: 'center',
@@ -880,5 +997,72 @@ const styles = StyleSheet.create({
     fontSize: 16,
     flex: 1,
     textAlign: 'right',
+  },
+
+  /** ANIMATED TOAST (Success / Error / Warning) **/
+  toastContainer: {
+    position: 'absolute',
+    top: 80,
+    left: 20,
+    right: 20,
+    paddingVertical: 15,
+    paddingHorizontal: 20,
+    borderRadius: 12,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.3,
+    shadowRadius: 4,
+    elevation: 6,
+    zIndex: 1000,
+  },
+  toastSuccess: {
+    backgroundColor: 'rgba(76, 175, 80, 0.95)',
+  },
+  toastWarning: {
+    backgroundColor: 'rgba(255, 152, 0, 0.95)',
+  },
+  toastError: {
+    backgroundColor: 'rgba(255, 59, 48, 0.95)',
+  },
+  toastText: {
+    color: '#ffffff',
+    fontSize: 16,
+    fontWeight: '600',
+    textAlign: 'center',
+  },
+
+  /** INCOMING HAZARD ALERT (Appears for 3s) **/
+  incomingAlertContainer: {
+    position: 'absolute',
+    top: 80,
+    left: 20,
+    right: 20,
+    zIndex: 1000,
+  },
+  incomingAlertContent: {
+    backgroundColor: 'rgba(255, 152, 0, 0.95)',
+    borderRadius: 15,
+    padding: 20,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.3,
+    shadowRadius: 5,
+    elevation: 10,
+  },
+  incomingAlertTitle: {
+    color: '#fff',
+    fontSize: 18,
+    fontWeight: 'bold',
+    marginBottom: 5,
+  },
+  incomingAlertText: {
+    color: '#fff',
+    fontSize: 14,
+    marginBottom: 5,
+  },
+  incomingAlertDistance: {
+    color: '#fff',
+    fontSize: 13,
+    fontStyle: 'italic',
   },
 });
