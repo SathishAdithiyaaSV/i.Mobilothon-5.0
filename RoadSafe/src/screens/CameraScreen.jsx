@@ -20,8 +20,8 @@ import RNFS from 'react-native-fs';
 import { useTensorflowModel } from 'react-native-fast-tflite';
 import { preprocessImage } from '../utils/preprocessImage.js';
 
-const API_BASE_URL = 'https://2811788f6e67.ngrok-free.app';
-const WS_URL = 'wss://2811788f6e67.ngrok-free.app/ws';
+const API_BASE_URL = 'https://i-mobilothon-5-0-2.onrender.com';
+const WS_URL = 'wss://i-mobilothon-5-0-2.onrender.com/ws';
 
 // Utility: compute distance (in meters) between two coordinates
 function getDistance(lat1, lon1, lat2, lon2) {
