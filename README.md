@@ -100,7 +100,7 @@ uvicorn main:app --reload --host 0.0.0.0 --port 8000
 ## 📱 Mobile App Setup (React Native)
 
 ```bash
-cd app
+cd RoadSafe
 npm install
 ```
 
